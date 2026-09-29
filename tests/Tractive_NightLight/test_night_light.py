@@ -43,35 +43,46 @@ class TestIsNight(unittest.TestCase):
 
 
 class TestIsAtHome(unittest.TestCase):
-    def test_power_saving_zone_means_home(self) -> None:
-        report = {"power_saving_zone_id": "abc123", "sensor_used": "GPS"}
+    def test_known_wifi_sensor_means_home(self) -> None:
+        report = {
+            "sensor_used": "KNOWN_WIFI",
+            "power_saving_zone_id": "6a16dfac5802f3993da028c7",
+        }
         self.assertTrue(night_light.is_at_home(report, make_settings()))
 
-    def test_empty_zone_id_is_not_home(self) -> None:
-        report = {"power_saving_zone_id": None, "sensor_used": "GPS"}
+    def test_gps_sensor_wins_over_zone_id(self) -> None:
+        # The zone id also shows up in hw_info, so it may name the tracker's
+        # assigned zone rather than its current one: sensor_used decides.
+        report = {
+            "sensor_used": "GPS",
+            "power_saving_zone_id": "6a16dfac5802f3993da028c7",
+        }
         self.assertFalse(night_light.is_at_home(report, make_settings()))
 
-    def test_known_wifi_sensor_means_home(self) -> None:
-        report = {"sensor_used": "KNOWN_WIFI"}
+    def test_zone_id_used_when_sensor_missing(self) -> None:
+        report = {"power_saving_zone_id": "6a16dfac5802f3993da028c7"}
         self.assertTrue(night_light.is_at_home(report, make_settings()))
+
+    def test_empty_report_is_not_home(self) -> None:
+        self.assertFalse(night_light.is_at_home({}, make_settings()))
 
     def test_gps_far_away_is_not_home(self) -> None:
         report = {"sensor_used": "GPS", "latlong": [46.2, 6.25]}
         settings = make_settings(
-            home_latitude=46.167, home_longitude=6.183, home_radius_meters=100
+            home_latitude=46.178263, home_longitude=6.163452, home_radius_meters=100
         )
         self.assertFalse(night_light.is_at_home(report, settings))
 
     def test_gps_inside_radius_is_home(self) -> None:
-        report = {"sensor_used": "GPS", "latlong": [46.1671, 6.1831]}
+        report = {"sensor_used": "GPS", "latlong": [46.178300, 6.163500]}
         settings = make_settings(
-            home_latitude=46.167, home_longitude=6.183, home_radius_meters=100
+            home_latitude=46.178263, home_longitude=6.163452, home_radius_meters=100
         )
         self.assertTrue(night_light.is_at_home(report, settings))
 
     def test_radius_disabled_ignores_coordinates(self) -> None:
-        report = {"sensor_used": "GPS", "latlong": [46.167, 6.183]}
-        settings = make_settings(home_latitude=46.167, home_longitude=6.183)
+        report = {"sensor_used": "GPS", "latlong": [46.178263, 6.163452]}
+        settings = make_settings(home_latitude=46.178263, home_longitude=6.163452)
         self.assertFalse(night_light.is_at_home(report, settings))
 
 

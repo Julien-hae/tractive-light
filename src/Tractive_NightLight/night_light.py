@@ -108,10 +108,12 @@ def distance_meters(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> f
 def is_at_home(pos_report: dict[str, Any], settings: Settings) -> bool:
     """Return whether the tracker is inside the power saving zone at home.
 
-    Tractive stops reporting GPS positions while the tracker sees the trusted
-    Wi-Fi network, and tags the report with the zone it sits in. Two further
-    signals are accepted as fallbacks: a Wi-Fi based ``sensor_used``, and, when
-    ``HOME_RADIUS_METERS`` is configured, the distance to the home coordinates.
+    ``sensor_used`` is the primary signal: Tractive stops using GPS and reports
+    a known Wi-Fi network while the tracker sits at home. It is trusted over
+    ``power_saving_zone_id``, which also appears in the hardware report and may
+    therefore name the zone the tracker is assigned to rather than the one it
+    currently sits in. When ``sensor_used`` is missing, the zone id is used
+    instead, and an optional geofence around the home coordinates comes last.
 
     Args:
         pos_report: the raw position report returned by the Tractive API.
@@ -120,11 +122,11 @@ def is_at_home(pos_report: dict[str, Any], settings: Settings) -> bool:
     Returns:
         True if the tracker should be considered at home.
     """
-    if pos_report.get("power_saving_zone_id"):
-        return True
-
     sensor_used = str(pos_report.get("sensor_used") or "").upper()
-    if sensor_used in WIFI_SENSORS:
+    if sensor_used:
+        if sensor_used in WIFI_SENSORS:
+            return True
+    elif pos_report.get("power_saving_zone_id"):
         return True
 
     if (
