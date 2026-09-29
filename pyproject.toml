@@ -1,16 +1,17 @@
 [tool.poetry]
 name = "Tractive-NightLight"
 version = "0.0.0" # Version is ignored and set by Tekton. Use pipeline to increase.
-description = "TODO"
+description = "Keeps a Tractive tracker's LED lit during the night."
 authors = ["Haefelin Julien <jhaefelin-git@aliasdesk.ch>"]
-repository = "https://github.com/Julien-hae/Tractive-NightLight.git"
-documentation = "https://github.com/Julien-hae/Tractive-NightLight/blob/master/README.md"
+repository = "https://github.com/Julien-hae/tractive-light.git"
+documentation = "https://github.com/Julien-hae/tractive-light/blob/master/README.md"
 packages = [{include = "Tractive_NightLight", from = "src"}]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "~3.14"
-numpy = "~1.26"                                     # NumPy is the fundamental package for array computing with Python.
+python = ">=3.13,<4.0"
+aiotractive = "^1.0"                                # Unofficial asynchronous Python client for the Tractive REST API.
+astral = "^3.2"                                     # Sunrise/sunset and twilight calculations.
 
 [tool.poetry.group.dev.dependencies]
 coverage = {extras = ["toml"], version = "~7.4"}    # Code coverage measurement for Python
@@ -31,7 +32,7 @@ build-backend = "poetry.core.masonry.api"
 # `ruff format` reformats to this width; black's default is kept so the migration
 # doesn't rewrap every existing file.
 line-length = 88
-target-version = "py314"
+target-version = "py313"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -67,8 +68,7 @@ known-first-party = ["Tractive_NightLight"]
 ]
 
 [tool.mypy]
-python_version = "3.14"
-plugins = "numpy.typing.mypy_plugin"
+python_version = "3.13"
 strict = true
 
 [tool.coverage.run]

@@ -5,9 +5,9 @@ clean:
 	rm -rf .venv
 
 setup_environment: check
-		pyenv install 3.14 --skip-existing \
-		&& pyenv local 3.14 \
-		&& poetry env use 3.14 \
+		pyenv install 3.13 --skip-existing \
+		&& pyenv local 3.13 \
+		&& poetry env use 3.13 \
 		&& poetry install \
 		&& poetry run pre-commit install
 

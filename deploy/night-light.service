@@ -1,0 +1,23 @@
+[Unit]
+Description=Tractive night light
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=julien
+WorkingDirectory=/home/julien/tractive-light
+EnvironmentFile=/home/julien/tractive-light/.env
+ExecStart=/home/julien/tractive-light/.venv/bin/entrypoint
+Restart=always
+RestartSec=30
+
+# Durcissement minimal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/julien/tractive-light
+
+[Install]
+WantedBy=multi-user.target

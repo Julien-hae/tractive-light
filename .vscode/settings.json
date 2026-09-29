@@ -5,9 +5,9 @@
     "python.testing.unittestArgs": [
         "-v",
         "-s",
-        ".",
+        "./tests",
         "-p",
-        "test*.py"
+        "*test*.py"
     ],
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
     "[python]": {
@@ -18,5 +18,7 @@
             "source.organizeImports.ruff": "explicit"
         },
     },
-    "ruff.importStrategy": "fromEnvironment"
+    "ruff.importStrategy": "fromEnvironment",
+    "python-envs.defaultEnvManager": "ms-python.python:poetry",
+    "python-envs.defaultPackageManager": "ms-python.python:poetry"
 }

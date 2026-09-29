@@ -10,7 +10,7 @@ LOGGER = logging.getLogger(__name__)
 class UTCFormatter(logging.Formatter):
     """UTC formatter which converts timestamps to UTC."""
 
-    converter = time.gmtime
+    converter = staticmethod(time.gmtime)
 
 
 LOGGING_CONFIG = {
