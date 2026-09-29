@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Run Main with args",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Tractive_NightLight.main",
+            "args": ["-w", "world"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            // This example launch-config promtps for arguments.
+            // You can tinker with it to specifically ask for arguments you have defined.
+            // To do so, create apropriate inputs and reference them here.
+            "name": "Python: Main, prompt for args",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Tractive_NightLight.main",
+            "args": ["${input:args}"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+    ],
+    "inputs": [
+        {
+          "id": "args",
+          "type":"promptString",
+          "description": "Arguments for main",
+          "default": "-w word"
+        },
+      ]
+}

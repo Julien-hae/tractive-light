@@ -1,0 +1,2 @@
+# Convert line endings of all text files to \n (as apposed to \r\n as on Windows for example)
+* text=auto

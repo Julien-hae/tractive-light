@@ -1,0 +1,75 @@
+[tool.poetry]
+name = "Tractive-NightLight"
+version = "0.0.0" # Version is ignored and set by Tekton. Use pipeline to increase.
+description = "TODO"
+authors = ["Haefelin Julien <jhaefelin-git@aliasdesk.ch>"]
+repository = "https://github.com/Julien-hae/Tractive-NightLight.git"
+documentation = "https://github.com/Julien-hae/Tractive-NightLight/blob/master/README.md"
+packages = [{include = "Tractive_NightLight", from = "src"}]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "~3.14"
+numpy = "~1.26"                                     # NumPy is the fundamental package for array computing with Python.
+
+[tool.poetry.group.dev.dependencies]
+coverage = {extras = ["toml"], version = "~7.4"}    # Code coverage measurement for Python
+unittest-xml-reporting = "~3.2"                     # unittest-based test runner with Ant/JUnit like XML reporting.
+pre-commit = "~3.6"                                 # A framework for managing and maintaining multi-language pre-commit hooks.
+pre-commit-hooks = "~4.5"                           # Some out-of-the-box hooks for pre-commit.
+ruff = "^0.14.14"                                   # Extremely fast Python linter and formatter, replaces black/isort/pydocstyle/pylint
+mypy = "~1.8"                                       # Tool for static type-checking
+
+[tool.poetry.scripts]
+entrypoint = 'Tractive_NightLight.main:cli'
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+# `ruff format` reformats to this width; black's default is kept so the migration
+# doesn't rewrap every existing file.
+line-length = 88
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "D",    # pydocstyle
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "PL",   # pylint
+    "RUF",  # ruff-specific rules
+]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 140  # E501 stays as lenient as pylint's max-line-length was
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pylint]
+max-args = 8
+
+[tool.ruff.lint.isort]
+known-first-party = ["Tractive_NightLight"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D",        # tests don't need docstrings, as pydocstyle's match-dir used to skip them
+    "PLR2004",  # magic values are fine in assertions
+]
+
+[tool.mypy]
+python_version = "3.14"
+plugins = "numpy.typing.mypy_plugin"
+strict = true
+
+[tool.coverage.run]
+command_line = "-m xmlrunner discover --output-file junittest.xml"

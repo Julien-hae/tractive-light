@@ -1,0 +1,68 @@
+repos:
+  - repo: local
+    hooks:
+      - id: poetry-check
+        name: poetry-check
+        description: run poetry check to validate config
+        entry: poetry check
+        language: system
+        pass_filenames: false
+        files: (^|/)pyproject.toml$
+
+      - id: trailing-whitespace-fixer
+        name: trailing-whitespace-fixer
+        entry: trailing-whitespace-fixer
+        language: python
+        types: [text]
+
+      - id: end-of-file-fixer
+        name: end-of-file-fixer
+        entry: end-of-file-fixer
+        language: python
+        types: [text]
+
+      - id: ruff_formatter
+        name: ruff_formatter
+        description: "Run 'ruff format' for extremely fast Python formatting"
+        entry: ruff format
+        args: ["--force-exclude"]
+        types_or: [python]
+        language: python
+
+      - id: ruff_linter
+        name: ruff_linter
+        description: "Run 'ruff' for extremely fast Python linting"
+        entry: ruff check
+        args:
+          [
+            "--force-exclude",
+            "--fix",
+            "--output-file",
+            "sonar_report.json",
+            "--output-format",
+            "json",
+          ]
+        types_or: [python]
+        language: python
+
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: python
+        'types_or': [python, pyi]
+        args: ["--scripts-are-modules"]
+        require_serial: true
+        additional_dependencies: []
+        minimum_pre_commit_version: '2.9.2'
+
+      - id: unittest-run
+        name: unittest-run
+        entry: coverage run
+        pass_filenames: false
+        language: system
+
+      - id: unittest-coverage-report
+        name: unittest-coverage-report
+        entry: coverage xml
+        pass_filenames: false
+        language: system

@@ -1,0 +1,12 @@
+# Answers recorded by Copier so that `copier update` can replay them.
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY.
+_commit: 2b29ef1
+_src_path: git@github.com:Julien-hae/CookieBlueprint.git
+author_email: jhaefelin-git@aliasdesk.ch
+author_first_name: Julien
+author_last_name: Haefelin
+description: TODO
+package_name: Tractive_NightLight
+project_name: Tractive NightLight
+python_version: '3.14'
+slugname: Tractive-NightLight
