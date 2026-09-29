@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=julien
-WorkingDirectory=/home/julien/tractive-light
-EnvironmentFile=/home/julien/tractive-light/.env
-ExecStart=/home/julien/tractive-light/.venv/bin/entrypoint
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=__PROJECT_DIR__/.env
+ExecStart=__PROJECT_DIR__/.venv/bin/entrypoint
 Restart=always
 RestartSec=30
 
@@ -17,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/julien/tractive-light
+ReadWritePaths=__PROJECT_DIR__
 
 [Install]
 WantedBy=multi-user.target
