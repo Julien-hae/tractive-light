@@ -17,8 +17,12 @@ def make_settings(**overrides: Any) -> night_light.Settings:
         "password": "secret",
         "tracker_id": None,
         "location": VEYRIER,
-        "refresh_seconds": 120,
-        "min_battery": 20,
+        "refresh_seconds": 240,
+        "idle_poll_seconds": 900,
+        "min_battery": 30,
+        "max_led_minutes": 120,
+        "light_from": None,
+        "light_until": None,
         "skip_when_home": True,
         "home_latitude": None,
         "home_longitude": None,
@@ -96,21 +100,85 @@ class TestDistanceMeters(unittest.TestCase):
         self.assertAlmostEqual(distance, 111_195, delta=500)
 
 
+class TestInClockWindow(unittest.TestCase):
+    def at(self, hour: int, minute: int = 0) -> dt.datetime:
+        return dt.datetime(2026, 10, 7, hour, minute, tzinfo=TZ)
+
+    def test_no_bounds_is_always_open(self) -> None:
+        self.assertTrue(night_light.in_clock_window(self.at(3), None, None))
+
+    def test_inside_simple_window(self) -> None:
+        start, end = dt.time(20, 0), dt.time(23, 30)
+        self.assertTrue(night_light.in_clock_window(self.at(21), start, end))
+
+    def test_outside_simple_window(self) -> None:
+        start, end = dt.time(20, 0), dt.time(23, 30)
+        self.assertFalse(night_light.in_clock_window(self.at(23, 45), start, end))
+
+    def test_window_crossing_midnight_includes_late_evening(self) -> None:
+        start, end = dt.time(22, 0), dt.time(2, 0)
+        self.assertTrue(night_light.in_clock_window(self.at(23, 30), start, end))
+
+    def test_window_crossing_midnight_includes_early_morning(self) -> None:
+        start, end = dt.time(22, 0), dt.time(2, 0)
+        self.assertTrue(night_light.in_clock_window(self.at(1), start, end))
+
+    def test_window_crossing_midnight_excludes_midday(self) -> None:
+        start, end = dt.time(22, 0), dt.time(2, 0)
+        self.assertFalse(night_light.in_clock_window(self.at(12), start, end))
+
+    def test_open_lower_bound(self) -> None:
+        self.assertTrue(night_light.in_clock_window(self.at(1), None, dt.time(2, 0)))
+        self.assertFalse(night_light.in_clock_window(self.at(3), None, dt.time(2, 0)))
+
+    def test_open_upper_bound(self) -> None:
+        self.assertTrue(night_light.in_clock_window(self.at(23), dt.time(22, 0), None))
+        self.assertFalse(night_light.in_clock_window(self.at(21), dt.time(22, 0), None))
+
+
+class TestBudgetExhausted(unittest.TestCase):
+    def test_zero_budget_means_unlimited(self) -> None:
+        self.assertFalse(night_light.budget_exhausted(99_999.0, 0))
+
+    def test_fresh_night_has_allowance(self) -> None:
+        self.assertFalse(night_light.budget_exhausted(0.0, 120))
+
+    def test_just_under_budget(self) -> None:
+        self.assertFalse(night_light.budget_exhausted(119 * 60, 120))
+
+    def test_budget_reached(self) -> None:
+        self.assertTrue(night_light.budget_exhausted(120 * 60, 120))
+
+
 class TestShouldLight(unittest.TestCase):
-    def test_day_never_lights(self) -> None:
-        self.assertFalse(night_light.should_light(False, False, 100, 20))
+    def test_not_allowed_never_lights(self) -> None:
+        self.assertFalse(night_light.should_light(False, False, 100, 30))
 
-    def test_night_away_lights(self) -> None:
-        self.assertTrue(night_light.should_light(True, False, 80, 20))
+    def test_allowed_away_lights(self) -> None:
+        self.assertTrue(night_light.should_light(True, False, 80, 30))
 
-    def test_night_at_home_stays_off(self) -> None:
-        self.assertFalse(night_light.should_light(True, True, 80, 20))
+    def test_at_home_stays_off(self) -> None:
+        self.assertFalse(night_light.should_light(True, True, 80, 30))
 
     def test_low_battery_stays_off(self) -> None:
-        self.assertFalse(night_light.should_light(True, False, 15, 20))
+        self.assertFalse(night_light.should_light(True, False, 25, 30))
 
     def test_battery_at_floor_lights(self) -> None:
-        self.assertTrue(night_light.should_light(True, False, 20, 20))
+        self.assertTrue(night_light.should_light(True, False, 30, 30))
 
     def test_unknown_battery_lights(self) -> None:
-        self.assertTrue(night_light.should_light(True, False, None, 20))
+        self.assertTrue(night_light.should_light(True, False, None, 30))
+
+
+class TestParseTime(unittest.TestCase):
+    def test_empty_is_none(self) -> None:
+        self.assertIsNone(night_light._parse_time(""))
+        self.assertIsNone(night_light._parse_time(None))
+        self.assertIsNone(night_light._parse_time("   "))
+
+    def test_parses_hh_mm(self) -> None:
+        self.assertEqual(night_light._parse_time("23:30"), dt.time(23, 30))
+
+    def test_rejects_garbage(self) -> None:
+        with self.assertRaises(ValueError):
+            night_light._parse_time("minuit")
