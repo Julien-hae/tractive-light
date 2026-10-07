@@ -100,6 +100,9 @@ celerybeat-schedule
 # SageMath parsed files
 *.sage.py
 
+# Battery experiment sessions: raw tracker payloads, kept out of a public repo
+/data/
+
 # Environments
 .env
 .venv

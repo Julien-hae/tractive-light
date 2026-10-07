@@ -64,6 +64,78 @@ Do not forget to activate your virtualenv when done with the makefile
 
 ## Usage
 
+### Battery experiments
+
+`entrypoint --experiment ARM` runs one measurement session and records everything the API returns to `data/<UTC start>_<arm>.jsonl`. Each arm does a single thing to the tracker, so two sessions differ by one cause only:
+
+| Arm | At each command interval | Isolates |
+|-----|--------------------------|----------|
+| `baseline` | nothing | the tracker's own discharge |
+| `reads` | reads the position and hardware reports, as production does | the cost of reading |
+| `command-off` | sends "LED off": a command reaches the tracker, the LED stays dark | the cost of a command |
+| `led-on` | sends "LED on", as production does | commands plus the lit LED |
+
+Every arm also samples the tracker every `EXPERIMENT_SAMPLE_SECONDS` and listens to the push channel, identically, so that cost cancels out between sessions. The `EXPERIMENT_*` variables are described in `.env.example`.
+
+#### A session, step by step
+
+Sessions are designed for a tracker left alone outdoors, not worn by the cat, and collected in the morning. A session has two phases:
+
+1. **Arm**, for exactly `EXPERIMENT_HOURS`. It ends early only if the reported battery level falls under `EXPERIMENT_MIN_BATTERY`: a tracker that runs flat sends no closing report, and the night would be lost.
+2. **Tail**, until the session is stopped (`EXPERIMENT_TAIL_HOURS` at most). Nothing is sent any more, the session only samples and listens. It is there to record the report the tracker sends when it is picked up.
+
+On the server, a session runs as a systemd unit, which stops the production service for as long as it lasts (`Conflicts=`) and survives the SSH session:
+
+```shell
+# Evening: tracker charged to 100 %, carried to its spot.
+sudo systemctl start night-light-experiment@led-on
+journalctl -u 'night-light-experiment@*' -n 5          # battery level, start warnings
+
+# Morning: pick the tracker up, move it, and wait for a new line
+# "Tracker reports battery at ...". Only then:
+sudo systemctl stop night-light-experiment@led-on      # closes the session cleanly
+.venv/bin/entrypoint --summarize data/*.jsonl          # compare sessions
+sudo systemctl start night-light                       # back to production
+```
+
+Stopping during the arm marks the session `interrupted`; stopping during the tail is the normal way to end it. Starting and stopping the unit without a password needs one more line in `/etc/sudoers.d/night-light`:
+
+```
+debian ALL=(ALL) NOPASSWD: /usr/bin/systemctl start night-light-experiment@*, /usr/bin/systemctl stop night-light-experiment@*
+```
+
+#### What makes sessions comparable
+
+Keep everything but the arm identical: tracker charged to 100 %, same spot, same `EXPERIMENT_HOURS`, same `EXPERIMENT_INTERVAL_SECONDS`, Tractive app closed. Write the weather and the temperature in `EXPERIMENT_NOTE`: cold reduces what a lithium battery delivers.
+
+The session checks its own start and records a `warning` when it is unfit for comparison:
+
+- the tracker locates itself by Wi-Fi: it is in its Power Saving Zone, where Tractive pauses the network connection and no command arrives;
+- the tracker reports that it is saving power;
+- the last hardware report is more than 15 minutes old, so the start level is not the current one.
+
+**A tracker that does not move may go to sleep.** Tractive documents a battery-saving mode entered when the tracker "hasn't moved for a while", in which location tracking is paused and commands for light and sound are not received. If that happens the three active arms measure the same thing. `--summarize` shows it: few tracker reports, a long `longest silence`, and LED events that stop while commands are still sent. Check this on a short daytime session before spending a night.
+
+A motionless tracker also takes fewer GPS fixes than a cat does, so a session measures what an arm *adds* to the discharge, not the battery life to expect on the cat.
+
+#### The session file
+
+One JSON object per line, each with its time `t` (UTC) and its `kind`:
+
+| Kind | Content |
+|------|---------|
+| `session_start` | parameters, git commit and whether the tree was modified, library versions, host |
+| `warning` | a problem found at the start |
+| `sample` | tracker details, hardware report and position report, every `EXPERIMENT_SAMPLE_SECONDS` |
+| `read` | the reads of the `reads` arm |
+| `command` | an LED command and the API's answer |
+| `event` | a push event, as received |
+| `error` | an API call or a channel connection that failed |
+| `arm_end` | how the arm ended: `completed`, `battery_floor` or `interrupted` |
+| `session_end` | the same reason, and how the tail ended: `stopped`, `elapsed` or `skipped` |
+
+A file without a `session_end` was cut short by a crash or a reboot, and `--summarize` reports its end as `missing`. Payloads are stored as the API returns them, except coordinates, which are masked in every record. `data/` is ignored by git: read a file before publishing it, it still holds the tracker and account identifiers.
+
 ## Contents and Concepts
 
 At first glance one may be overwhelmed by the amount of files and folders present in this directory. This is mainly due to the fact, that each tool uses its own configuration file. The situation has improved with more and more tools adding support for pyproject.toml. The following two tables describe the main structure of the project:

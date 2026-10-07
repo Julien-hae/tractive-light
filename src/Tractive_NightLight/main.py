@@ -3,8 +3,9 @@
 import argparse
 import asyncio
 import logging
+from pathlib import Path
 
-from Tractive_NightLight import night_light
+from Tractive_NightLight import experiment, night_light
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,7 +48,35 @@ def cli() -> None:
         action="store_true",
         help="Print the raw tracker payloads and exit.",
     )
+    parser.add_argument(
+        "--experiment",
+        choices=[arm.value for arm in experiment.Arm],
+        help="Run one battery experiment session and record it to a file.",
+    )
+    parser.add_argument(
+        "--summarize",
+        nargs="+",
+        type=Path,
+        metavar="FILE",
+        help="Print the summary of recorded experiment sessions and exit.",
+    )
     args = parser.parse_args()
+
+    if args.summarize:
+        for path in args.summarize:
+            summary = experiment.summarize(experiment.load_records(path))
+            print(f"{path}\n{experiment.format_summary(summary)}\n")
+        return
+    if args.experiment:
+        settings = night_light.Settings.from_env()
+        experiment.execute(
+            settings,
+            experiment.ExperimentConfig.from_env(
+                experiment.Arm(args.experiment), settings.refresh_seconds
+            ),
+        )
+        return
+
     main(force_night=args.force_night, do_inspect=args.inspect)
 
 
