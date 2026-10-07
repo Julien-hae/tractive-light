@@ -1,0 +1,25 @@
+[Unit]
+Description=Tractive night light battery experiment (%i)
+After=network-online.target
+Wants=network-online.target
+# Un seul des deux touche au tracker : démarrer une expérience arrête le
+# service de production, et inversement.
+Conflicts=night-light.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=__PROJECT_DIR__/.env
+ExecStart=__PROJECT_DIR__/.venv/bin/entrypoint --experiment %i
+# Une session se termine d'elle-même : la relancer fausserait la mesure.
+Restart=no
+# Laisse le temps d'écrire le dernier relevé après un arrêt manuel.
+TimeoutStopSec=60
+
+# Durcissement minimal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__PROJECT_DIR__

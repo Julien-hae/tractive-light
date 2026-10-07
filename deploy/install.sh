@@ -23,10 +23,14 @@ if [[ ! -x "$PROJECT_DIR/.venv/bin/entrypoint" ]]; then
   exit 1
 fi
 
-echo "==> Génération du service systemd (user=$SERVICE_USER, dir=$PROJECT_DIR)"
-sed -e "s|__USER__|$SERVICE_USER|g" \
-    -e "s|__PROJECT_DIR__|$PROJECT_DIR|g" \
-    deploy/night-light.service | sudo tee /etc/systemd/system/night-light.service >/dev/null
+echo "==> Génération des services systemd (user=$SERVICE_USER, dir=$PROJECT_DIR)"
+# night-light-experiment@ est un gabarit : il n'est ni activé ni démarré ici,
+# une session se lance à la main (voir README, « Battery experiments »).
+for unit in night-light.service night-light-experiment@.service; do
+  sed -e "s|__USER__|$SERVICE_USER|g" \
+      -e "s|__PROJECT_DIR__|$PROJECT_DIR|g" \
+      "deploy/$unit" | sudo tee "/etc/systemd/system/$unit" >/dev/null
+done
 
 sudo systemctl daemon-reload
 sudo systemctl enable night-light
