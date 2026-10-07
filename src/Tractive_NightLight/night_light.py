@@ -1,11 +1,17 @@
 """Keep a Tractive tracker's LED lit during the night, within a battery budget.
 
-Tractive switches the LED off after a few minutes to spare the tracker's
-battery. This module re-sends the "LED on" command at a shorter interval so the
-light stays on, and keeps the cost bounded in three ways: a nightly budget of
-lit minutes, an optional clock window narrower than dusk-to-dawn, and a battery
-floor. When lighting is not possible the loop falls back to a long idle
-interval, so the tracker is left alone rather than polled every two minutes.
+Tractive switches the LED off six minutes after the command, to spare the
+tracker's battery. This module re-sends the "LED on" command at a shorter
+interval so the light stays on, and keeps the cost bounded three ways: one or
+more lighting windows inside the night, a budget of lit minutes per window, and
+a battery floor. When lighting is not possible the loop falls back to a long
+idle interval, so the tracker is left alone rather than polled every two
+minutes.
+
+Windows are what make the cost worth paying: the LED earns its battery during
+the evening and early-morning traffic, not in the quiet middle of the night. A
+window bound is either a local ``HH:MM`` time or one of the sun events ``dusk``
+and ``dawn``, so ``dusk-22:00,04:00-dawn`` follows the seasons on both ends.
 """
 
 import asyncio
@@ -15,7 +21,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final, Literal
 
 from aiotractive import Tractive
 from astral import LocationInfo
@@ -32,26 +38,84 @@ EARTH_RADIUS_METERS = 6_371_000
 LATLONG_LENGTH = 2
 SECONDS_PER_MINUTE = 60
 
+type SunEvent = Literal["dusk", "dawn"]
+type Bound = dt.time | SunEvent
+
+DUSK: Final[SunEvent] = "dusk"
+DAWN: Final[SunEvent] = "dawn"
+DEFAULT_WINDOWS_RAW: Final = f"{DUSK}-{DAWN}"
+
 # Values of ``sensor_used`` that mean the tracker located itself from a known
 # Wi-Fi network rather than from GPS, i.e. it is at home.
 WIFI_SENSORS = frozenset({"KNOWN_WIFI", "WIFI"})
 
 
-def _parse_time(raw: str | None) -> dt.time | None:
-    """Parse a ``HH:MM`` local time, or return None when unset.
+@dataclass(frozen=True)
+class LightWindow:
+    """One stretch of the night during which the LED may be lit.
+
+    Attributes:
+        start: the opening bound, a local time or a sun event.
+        end: the closing bound, a local time or a sun event.
+        label: the window as written in the configuration, for logging.
+    """
+
+    start: Bound
+    end: Bound
+    label: str
+
+
+def parse_bound(raw: str) -> Bound:
+    """Parse one window bound: ``dusk``, ``dawn``, or a ``HH:MM`` local time.
 
     Args:
-        raw: the value read from the environment, possibly empty.
+        raw: the bound as written in the configuration.
 
     Returns:
-        The parsed time, or None when ``raw`` is empty or unset.
+        The sun event name, or the parsed time.
 
     Raises:
-        ValueError: if ``raw`` is set but not a valid ``HH:MM`` time.
+        ValueError: if ``raw`` is neither a sun event nor a valid time.
+    """
+    value = raw.strip().lower()
+    if value == DUSK:
+        return DUSK
+    if value == DAWN:
+        return DAWN
+    return dt.time.fromisoformat(value)
+
+
+def parse_windows(raw: str | None) -> tuple[LightWindow, ...]:
+    """Parse a comma-separated list of windows such as ``dusk-22:00,04:00-dawn``.
+
+    Args:
+        raw: the configured value; empty means one window from dusk to dawn.
+
+    Returns:
+        The parsed windows, in the order given.
+
+    Raises:
+        ValueError: if a window is not of the form ``START-END``, or a bound
+            cannot be parsed.
     """
     if not raw or not raw.strip():
-        return None
-    return dt.time.fromisoformat(raw.strip())
+        raw = DEFAULT_WINDOWS_RAW
+
+    windows: list[LightWindow] = []
+    for chunk in raw.split(","):
+        label = chunk.strip()
+        if not label:
+            continue
+        start_raw, separator, end_raw = label.partition("-")
+        if not separator or not end_raw.strip():
+            msg = f"Window {label!r} is not of the form START-END."
+            raise ValueError(msg)
+        windows.append(LightWindow(parse_bound(start_raw), parse_bound(end_raw), label))
+
+    if not windows:
+        msg = "LIGHT_WINDOWS is set but lists no window."
+        raise ValueError(msg)
+    return tuple(windows)
 
 
 @dataclass(frozen=True)
@@ -66,8 +130,7 @@ class Settings:
     idle_poll_seconds: int
     min_battery: int
     max_led_minutes: int
-    light_from: dt.time | None
-    light_until: dt.time | None
+    light_windows: tuple[LightWindow, ...]
     skip_when_home: bool
     home_latitude: float | None
     home_longitude: float | None
@@ -103,8 +166,7 @@ class Settings:
             max_led_minutes=int(
                 os.environ.get("MAX_LED_MINUTES", str(DEFAULT_MAX_LED_MINUTES))
             ),
-            light_from=_parse_time(os.environ.get("LIGHT_FROM")),
-            light_until=_parse_time(os.environ.get("LIGHT_UNTIL")),
+            light_windows=parse_windows(os.environ.get("LIGHT_WINDOWS")),
             skip_when_home=os.environ.get("SKIP_WHEN_HOME", "true").lower()
             in {"1", "true", "yes"},
             home_latitude=float(home_latitude) if home_latitude else None,
@@ -127,40 +189,98 @@ def is_night(location: LocationInfo, now: dt.datetime) -> bool:
     return now < events["dawn"] or now >= events["dusk"]
 
 
-def in_clock_window(
-    now: dt.datetime, start: dt.time | None, end: dt.time | None
-) -> bool:
-    """Return whether ``now`` falls inside an optional local-time window.
+def night_bounds(
+    location: LocationInfo, now: dt.datetime
+) -> tuple[dt.datetime, dt.datetime]:
+    """Return the dusk and dawn bracketing the night that contains ``now``.
 
-    The window may cross midnight: a 22:00 to 02:00 window includes 23:30 and
-    01:00 but not 12:00. An unset bound means that side is open.
+    A night spans two calendar dates, so an early-morning moment belongs to the
+    night that began at the previous day's dusk.
 
     Args:
+        location: the place the sun times are computed for.
         now: a timezone-aware moment in time.
-        start: the time the window opens, or None for no lower bound.
-        end: the time the window closes, or None for no upper bound.
 
     Returns:
-        True when the window is open at ``now``.
+        The night's starting dusk and closing dawn, as datetimes.
     """
-    current = now.time()
-    if start is None and end is None:
-        return True
-    if start is None:
-        return end is not None and current < end
-    if end is None:
-        return current >= start
-    if start <= end:
-        return start <= current < end
-    return current >= start or current < end
+    today = sun(location.observer, date=now.date(), tzinfo=location.tzinfo)
+    if now < today["dawn"]:
+        yesterday = sun(
+            location.observer,
+            date=now.date() - dt.timedelta(days=1),
+            tzinfo=location.tzinfo,
+        )
+        return yesterday["dusk"], today["dawn"]
+    tomorrow = sun(
+        location.observer,
+        date=now.date() + dt.timedelta(days=1),
+        tzinfo=location.tzinfo,
+    )
+    return today["dusk"], tomorrow["dawn"]
+
+
+def resolve_bound(
+    bound: Bound,
+    night_start: dt.datetime,
+    night_end: dt.datetime,
+    not_before: dt.datetime,
+) -> dt.datetime:
+    """Place a window bound on the calendar, inside the night at hand.
+
+    A clock bound is placed on the first date at which it falls at or after
+    ``not_before``, so 22:00 lands on the evening and 04:00 on the morning of
+    the same night.
+
+    Args:
+        bound: a sun event name, or a local time.
+        night_start: the night's dusk.
+        night_end: the night's dawn.
+        not_before: the earliest moment this bound may land on.
+
+    Returns:
+        The bound as a timezone-aware datetime.
+    """
+    if not isinstance(bound, dt.time):
+        return night_start if bound == DUSK else night_end
+    candidate = dt.datetime.combine(not_before.date(), bound, tzinfo=not_before.tzinfo)
+    if candidate < not_before:
+        candidate += dt.timedelta(days=1)
+    return candidate
+
+
+def active_window(
+    windows: tuple[LightWindow, ...], location: LocationInfo, now: dt.datetime
+) -> LightWindow | None:
+    """Return the first window that contains ``now``, or None.
+
+    Args:
+        windows: the configured windows, in order.
+        location: the place the sun times are computed for.
+        now: a timezone-aware moment in time.
+
+    Returns:
+        The window open at ``now``, or None when none is.
+    """
+    night_start, night_end = night_bounds(location, now)
+    for window in windows:
+        start = resolve_bound(window.start, night_start, night_end, night_start)
+        end = resolve_bound(window.end, night_start, night_end, start)
+        if start <= now < end:
+            return window
+    return None
 
 
 def budget_exhausted(lit_seconds: float, max_led_minutes: int) -> bool:
-    """Return whether the LED has already used up tonight's allowance.
+    """Return whether the LED has used up the current window's allowance.
+
+    The allowance is per window, not per night: an evening window spending it
+    all must not leave the early-morning window dark, since that is when the
+    light is needed most.
 
     Args:
-        lit_seconds: seconds the LED has been lit since the night started.
-        max_led_minutes: the nightly allowance; 0 means unlimited.
+        lit_seconds: seconds the LED has been lit since the window opened.
+        max_led_minutes: the per-window allowance; 0 means unlimited.
 
     Returns:
         True when no allowance is left.
@@ -278,21 +398,28 @@ async def _session(settings: Settings, force_night: bool) -> None:
         tracker = await _pick_tracker(client, settings.tracker_id)
         led_on: bool | None = None
         lit_seconds = 0.0
+        window: LightWindow | None = None
+        last_window: LightWindow | None = None
         last_battery: int | None = None
 
         while True:
             now = dt.datetime.now(settings.location.tzinfo)
             night = force_night or is_night(settings.location, now)
-            if not night:
-                # A new night starts with a full allowance.
+            window = (
+                active_window(settings.light_windows, settings.location, now)
+                if night
+                else None
+            )
+
+            if window != last_window:
+                # Each window opens with a full allowance of its own.
                 lit_seconds = 0.0
+                if window is not None:
+                    LOGGER.info("Entering lighting window %s.", window.label)
+                last_window = window
 
             spent = budget_exhausted(lit_seconds, settings.max_led_minutes)
-            allowed = (
-                night
-                and not spent
-                and in_clock_window(now, settings.light_from, settings.light_until)
-            )
+            allowed = window is not None and not spent
 
             # The API is only queried when lighting is otherwise possible, so a
             # day, an out-of-window hour or a spent budget costs nothing.
@@ -325,10 +452,11 @@ async def _session(settings: Settings, force_night: bool) -> None:
                     )
                 )
                 LOGGER.info(
-                    "LED %s%s (%.0f min used tonight).",
+                    "LED %s%s (%.0f min used in %s).",
                     "on" if wanted else "off",
                     reason,
                     lit_seconds / SECONDS_PER_MINUTE,
+                    window.label if window is not None else "no window",
                 )
             led_on = wanted
 
@@ -345,9 +473,9 @@ def _off_reason(
     if not night:
         return " (daylight)"
     if spent:
-        return " (nightly budget spent)"
+        return " (window budget spent)"
     if not allowed:
-        return " (outside the lighting window)"
+        return " (outside every lighting window)"
     if at_home:
         return " (tracker at home)"
     if battery_low:

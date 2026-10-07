@@ -22,15 +22,15 @@ def main(force_night: bool = False, do_inspect: bool = False) -> None:
         return
 
     LOGGER.info(
-        "Starting night light for %s: refresh %ss while lit, idle poll %ss, "
-        "battery floor %s%%, budget %s min/night, window %s-%s, skip when home %s.",
+        "Starting night light for %s: windows %s, budget %s min per window, "
+        "refresh %ss while lit, idle poll %ss, battery floor %s%%, "
+        "skip when home %s.",
         settings.location.name,
+        ", ".join(window.label for window in settings.light_windows),
+        settings.max_led_minutes or "unlimited",
         settings.refresh_seconds,
         settings.idle_poll_seconds,
         settings.min_battery,
-        settings.max_led_minutes or "unlimited",
-        settings.light_from or "dusk",
-        settings.light_until or "dawn",
         settings.skip_when_home,
     )
     asyncio.run(night_light.run(settings, force_night=force_night))

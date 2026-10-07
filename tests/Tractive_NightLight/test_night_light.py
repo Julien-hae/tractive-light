@@ -21,8 +21,7 @@ def make_settings(**overrides: Any) -> night_light.Settings:
         "idle_poll_seconds": 900,
         "min_battery": 30,
         "max_led_minutes": 120,
-        "light_from": None,
-        "light_until": None,
+        "light_windows": night_light.parse_windows(None),
         "skip_when_home": True,
         "home_latitude": None,
         "home_longitude": None,
@@ -100,40 +99,114 @@ class TestDistanceMeters(unittest.TestCase):
         self.assertAlmostEqual(distance, 111_195, delta=500)
 
 
-class TestInClockWindow(unittest.TestCase):
-    def at(self, hour: int, minute: int = 0) -> dt.datetime:
-        return dt.datetime(2026, 10, 7, hour, minute, tzinfo=TZ)
+class TestParseWindows(unittest.TestCase):
+    def test_empty_defaults_to_dusk_dawn(self) -> None:
+        windows = night_light.parse_windows(None)
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0].start, night_light.DUSK)
+        self.assertEqual(windows[0].end, night_light.DAWN)
 
-    def test_no_bounds_is_always_open(self) -> None:
-        self.assertTrue(night_light.in_clock_window(self.at(3), None, None))
+    def test_two_windows(self) -> None:
+        windows = night_light.parse_windows("dusk-22:00,04:00-dawn")
+        self.assertEqual(len(windows), 2)
+        self.assertEqual(windows[0].start, night_light.DUSK)
+        self.assertEqual(windows[0].end, dt.time(22, 0))
+        self.assertEqual(windows[1].start, dt.time(4, 0))
+        self.assertEqual(windows[1].end, night_light.DAWN)
 
-    def test_inside_simple_window(self) -> None:
-        start, end = dt.time(20, 0), dt.time(23, 30)
-        self.assertTrue(night_light.in_clock_window(self.at(21), start, end))
+    def test_labels_are_kept_for_logging(self) -> None:
+        windows = night_light.parse_windows(" dusk-22:00 , 04:00-dawn ")
+        self.assertEqual([w.label for w in windows], ["dusk-22:00", "04:00-dawn"])
 
-    def test_outside_simple_window(self) -> None:
-        start, end = dt.time(20, 0), dt.time(23, 30)
-        self.assertFalse(night_light.in_clock_window(self.at(23, 45), start, end))
+    def test_case_is_ignored(self) -> None:
+        windows = night_light.parse_windows("DUSK-DAWN")
+        self.assertEqual(windows[0].start, night_light.DUSK)
 
-    def test_window_crossing_midnight_includes_late_evening(self) -> None:
-        start, end = dt.time(22, 0), dt.time(2, 0)
-        self.assertTrue(night_light.in_clock_window(self.at(23, 30), start, end))
+    def test_missing_separator_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            night_light.parse_windows("22:00")
 
-    def test_window_crossing_midnight_includes_early_morning(self) -> None:
-        start, end = dt.time(22, 0), dt.time(2, 0)
-        self.assertTrue(night_light.in_clock_window(self.at(1), start, end))
+    def test_missing_end_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            night_light.parse_windows("22:00-")
 
-    def test_window_crossing_midnight_excludes_midday(self) -> None:
-        start, end = dt.time(22, 0), dt.time(2, 0)
-        self.assertFalse(night_light.in_clock_window(self.at(12), start, end))
+    def test_unknown_bound_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            night_light.parse_windows("dusk-minuit")
 
-    def test_open_lower_bound(self) -> None:
-        self.assertTrue(night_light.in_clock_window(self.at(1), None, dt.time(2, 0)))
-        self.assertFalse(night_light.in_clock_window(self.at(3), None, dt.time(2, 0)))
 
-    def test_open_upper_bound(self) -> None:
-        self.assertTrue(night_light.in_clock_window(self.at(23), dt.time(22, 0), None))
-        self.assertFalse(night_light.in_clock_window(self.at(21), dt.time(22, 0), None))
+class TestNightBounds(unittest.TestCase):
+    def test_evening_belongs_to_the_night_starting_today(self) -> None:
+        now = dt.datetime(2026, 10, 7, 21, 0, tzinfo=TZ)
+        start, end = night_light.night_bounds(VEYRIER, now)
+        self.assertEqual(start.date(), dt.date(2026, 10, 7))
+        self.assertEqual(end.date(), dt.date(2026, 10, 8))
+
+    def test_early_morning_belongs_to_yesterdays_night(self) -> None:
+        now = dt.datetime(2026, 10, 7, 5, 0, tzinfo=TZ)
+        start, end = night_light.night_bounds(VEYRIER, now)
+        self.assertEqual(start.date(), dt.date(2026, 10, 6))
+        self.assertEqual(end.date(), dt.date(2026, 10, 7))
+
+    def test_now_is_inside_its_own_night(self) -> None:
+        for hour in (3, 5, 20, 23):
+            now = dt.datetime(2026, 10, 7, hour, tzinfo=TZ)
+            start, end = night_light.night_bounds(VEYRIER, now)
+            self.assertLessEqual(start, now, f"hour {hour}")
+            self.assertLess(now, end, f"hour {hour}")
+
+
+class TestActiveWindow(unittest.TestCase):
+    WINDOWS = night_light.parse_windows("dusk-22:00,04:00-dawn")
+
+    def active(self, hour: int, minute: int = 0) -> str | None:
+        now = dt.datetime(2026, 10, 7, hour, minute, tzinfo=TZ)
+        window = night_light.active_window(self.WINDOWS, VEYRIER, now)
+        return window.label if window else None
+
+    def test_just_after_dusk_opens_the_evening_window(self) -> None:
+        # Dusk is 19:34 on 7 October 2026 in Veyrier.
+        self.assertEqual(self.active(19, 40), "dusk-22:00")
+
+    def test_just_before_dusk_is_closed(self) -> None:
+        self.assertIsNone(self.active(19, 20))
+
+    def test_quiet_middle_of_the_night_is_closed(self) -> None:
+        self.assertIsNone(self.active(23, 30))
+        self.assertIsNone(self.active(2, 0))
+
+    def test_early_morning_opens_the_morning_window(self) -> None:
+        self.assertEqual(self.active(5, 0), "04:00-dawn")
+
+    def test_just_before_four_is_closed(self) -> None:
+        self.assertIsNone(self.active(3, 55))
+
+    def test_after_dawn_is_closed(self) -> None:
+        # Dawn is 07:11 on 7 October 2026.
+        self.assertIsNone(self.active(7, 30))
+
+    def test_midday_is_closed(self) -> None:
+        self.assertIsNone(self.active(12, 0))
+
+    def test_default_window_covers_the_whole_night(self) -> None:
+        windows = night_light.parse_windows(None)
+        for hour in (20, 23, 2, 5):
+            now = dt.datetime(2026, 10, 7, hour, tzinfo=TZ)
+            self.assertIsNotNone(
+                night_light.active_window(windows, VEYRIER, now), f"hour {hour}"
+            )
+
+    def test_window_crossing_midnight(self) -> None:
+        windows = night_light.parse_windows("22:00-02:00")
+        for hour, expected in (
+            (21, None),
+            (23, "22:00-02:00"),
+            (1, "22:00-02:00"),
+            (3, None),
+        ):
+            now = dt.datetime(2026, 10, 7, hour, tzinfo=TZ)
+            window = night_light.active_window(windows, VEYRIER, now)
+            self.assertEqual(window.label if window else None, expected, f"hour {hour}")
 
 
 class TestBudgetExhausted(unittest.TestCase):
@@ -168,17 +241,3 @@ class TestShouldLight(unittest.TestCase):
 
     def test_unknown_battery_lights(self) -> None:
         self.assertTrue(night_light.should_light(True, False, None, 30))
-
-
-class TestParseTime(unittest.TestCase):
-    def test_empty_is_none(self) -> None:
-        self.assertIsNone(night_light._parse_time(""))
-        self.assertIsNone(night_light._parse_time(None))
-        self.assertIsNone(night_light._parse_time("   "))
-
-    def test_parses_hh_mm(self) -> None:
-        self.assertEqual(night_light._parse_time("23:30"), dt.time(23, 30))
-
-    def test_rejects_garbage(self) -> None:
-        with self.assertRaises(ValueError):
-            night_light._parse_time("minuit")
